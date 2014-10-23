@@ -37,4 +37,9 @@
   a final value or a final Injection with additional values.
   Must be called once and only once."))
 
+(extend-protocol Pipe
+  clojure.lang.AFn
+  (process [this x] (this x))
+  (finish! [this]   nil))
+
 (defrecord Pipeline [pipes feed step backlog])

@@ -3,6 +3,29 @@
     [transmuter.feed :as feed]
     [transmuter.guard :as g]))
 
+(defprotocol PipeDefinition
+  (>pipe [this] "Initialize the pipe described by this definition."))
+
+(extend-protocol PipeDefinition
+  clojure.lang.APersistentVector
+  (>pipe [this] (map >pipe this))
+
+  clojure.lang.ISeq
+  (>pipe [this] (map >pipe this))
+
+  clojure.lang.AFn
+  (>pipe [this] (this))
+
+  nil
+  (>pipe [this] nil))
+
+(defn >pipes
+  [pipes]
+  (->> pipes
+    (map >pipe)
+    flatten
+    vec))
+
 (defprotocol Pipe
   (process [this x]
   "Process the given value and return a result. May return

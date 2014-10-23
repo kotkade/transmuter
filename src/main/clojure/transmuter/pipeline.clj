@@ -43,3 +43,7 @@
   (finish! [this]   nil))
 
 (defrecord Pipeline [pipes feed step backlog])
+
+(defn >pipeline
+  [pipes feed]
+  (->Pipeline (>pipes pipes) (volatile! feed) (volatile! 0) (volatile! nil)))

@@ -42,8 +42,33 @@
   (process [this x] (this x))
   (finish! [this]   nil))
 
-(defrecord Pipeline [pipes feed step backlog])
+(defprotocol Pipeline
+  (-push-feed! [this feed step])
+  (-pop-feed!  [this])
+  (-bump-step! [this]))
+
+(deftype APipeline [pipes
+                    ^:unsynchronized-mutable feed
+                    ^:unsynchronized-mutable step
+                    ^:unsynchronized-mutable backlog]
+  Pipeline
+  (-push-feed! [this f s]
+    (set! (.backlog this) (conj (.backlog this) [(.feed this) (.step this)]))
+    (set! (.feed this) f)
+    (set! (.step this) s)
+    nil)
+
+  (-pop-feed! [this]
+    (let [[f s] (first (.backlog this))]
+      (set! (.feed this) f)
+      (set! (.step this) s)
+      (set! (.backlog this) (next (.backlog this))))
+    nil)
+
+  (-bump-step! [this]
+    (set! (.step this) (inc (.step this)))
+    nil))
 
 (defn >pipeline
   [pipes feed]
-  (->Pipeline (>pipes pipes) (volatile! feed) (volatile! 0) (volatile! nil)))
+  (APipeline. (>pipes pipes) feed 0 nil))

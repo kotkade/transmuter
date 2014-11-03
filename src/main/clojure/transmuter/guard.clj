@@ -15,3 +15,9 @@
 (defn vacuum?
   [this]
   (identical? this vacuum))
+
+(deftype Injection [payload])
+
+(defn injection?
+  [this]
+  (instance? Injection this))

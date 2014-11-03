@@ -6,21 +6,18 @@
   (:require
     [transmuter.guard :refer [void vacuum]]))
 
-(defprotocol Feed
-  (poll! [this] "Retrieve the next value from the Feed. Returns guard/void
-  when the feed is exhausted. May return guard/vacuum when a
-  new value is not available, yet."))
-
 (defprotocol Source
-  (>feed [this] "Create a feed from the given input source."))
+  (>feed [this] "Create a feed from the given input source. A feed is a
+  procedure, which either returns the next value from the source,
+  guard/vacuum when a new value is not yet available or guard/void
+  if the input source is exhausted."))
 
 (defn -iterator-feed
   [^Iterator iter]
-  (reify Feed
-    (poll! [_this]
-      (if (.hasNext iter)
-        (.next iter)
-        void))))
+  (fn []
+    (if (.hasNext iter)
+      (.next iter)
+      void)))
 
 (defn -iterable-feed
   [^Iterable this]
@@ -29,14 +26,13 @@
 (defn -seq-feed
   [s]
   (let [vs (volatile! s)]
-    (reify Feed
-      (poll! [_this]
-        (if-let [s (vswap! vs seq)]
-          (do
-            (let [fst (first s)]
-              (vswap! vs rest)
-              fst))
-          void)))))
+    (fn []
+      (if-let [s (vswap! vs seq)]
+        (do
+          (let [fst (first s)]
+            (vswap! vs rest)
+            fst))
+        void))))
 
 (defn -seqable-feed
   [coll]
@@ -59,5 +55,5 @@
     (>feed this))
 
   nil
-  (>feed [this] (reify Feed (poll! [_this] void))))
+  (>feed [this] (constantly void)))
 

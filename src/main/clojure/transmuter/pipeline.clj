@@ -1,4 +1,6 @@
 (ns transmuter.pipeline
+  (:refer-clojure
+    :exclude [sequence])
   (:require
     [transmuter.feed :refer [>feed]]
     [transmuter.guard
@@ -176,3 +178,30 @@
       ; We are done. All input feeds are exhausted and all
       ; finalizers were called. Return void upstream.
       :else void)))
+
+(defn transmute
+  "Reduces the collection according to the reducing function f. Each
+  value is transformed by virtue of the given pipe steps. The initial
+  value for the reduction is obtained by calling the f without arguments.
+  For each transformed value f is called with the accumulator and the
+  value. After the input is exhausted f is called once with only the
+  accumulator."
+  [pipes f coll]
+  (let [pipeline (>pipeline pipes (>feed coll))]
+    (loop [acc (f)]
+      (let [x (pull! pipeline)]
+        (if-not (void? x)
+          (recur (f acc x))
+          (f acc))))))
+
+(defn sequence
+  "Creates a lazy sequence based on the transformed values of the
+  input."
+  [pipes coll]
+  (let [pipeline (>pipeline pipes (>feed coll))
+        step     (fn step []
+                   (lazy-seq
+                     (let [x (pull! pipeline)]
+                       (when-not (void? x)
+                         (cons x (step))))))]
+    (step)))

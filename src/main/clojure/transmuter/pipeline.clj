@@ -48,136 +48,132 @@
   (finish! [this]   nil))
 
 (defprotocol Pipeline
-  (-push-feed! [this feed step])
-  (-pop-feed!  [this])
-  (-bump-step! [this]))
+  (pull!           [this])
+  (-push-feed!     [this feed step])
+  (-pop-feed!      [this])
+  (-bump-step!     [this])
+  (-process-input! [this]))
 
-(deftype APipeline [pipes
-                    ^:unsynchronized-mutable feed
-                    ^:unsynchronized-mutable step
-                    ^:unsynchronized-mutable backlog]
+(deftype APipeline
+  [pipes
+   ^:unsynchronized-mutable feed
+   ^:unsynchronized-mutable step
+   ^:unsynchronized-mutable backlog]
   Pipeline
   (-push-feed! [this f s]
-    (set! (.backlog this) (conj (.backlog this) [(.feed this) (.step this)]))
-    (set! (.feed this) f)
-    (set! (.step this) s)
+    (set! backlog (conj backlog [feed step]))
+    (set! feed f)
+    (set! step s)
     nil)
 
   (-pop-feed! [this]
-    (let [[f s] (first (.backlog this))]
-      (set! (.feed this) f)
-      (set! (.step this) s)
-      (set! (.backlog this) (next (.backlog this))))
+    (let [[f s] (first backlog)]
+      (set! feed f)
+      (set! step s)
+      (set! backlog (next backlog)))
     nil)
 
   (-bump-step! [this]
-    (set! (.step this) (inc (.step this)))
-    nil))
+    (set! step (inc step))
+    nil)
+
+  (-process-input! [this]
+    ; Get an input and start at the current step.
+    (loop [x (feed)
+           n step]
+      (cond
+        ; We actually tried to read from the feed but there was
+        ; nothing available. That also means we talk about the
+        ; initial feed and the first pipeline step. Inner steps
+        ; may only inject values. Escalate to upstream.
+        (vacuum? x) vacuum
+
+        ; The input is void. So no further input in this feed.
+        ; Escalate to upstream.
+        (void? x)   void
+
+        ; There is some input and we got more steps left.
+        (< n (alength pipes))
+        ; Run the transformation.
+        (let [r (process (aget pipes n) x)]
+          (cond
+            ; The transformation requested to stop here.
+            ; Escalate upwards.
+            (stop? r)      stop
+
+            ; The transformation chose to elide the value.
+            ; Continue with the current step.
+            (void? r)      (recur (feed) n)
+
+            ; The transformation wants to inject values. Eg. cat.
+            ; Push the current feed and step position in the backlog.
+            ; Continue with the injected feed and the next step.
+            (injection? r) (do
+                             (-push-feed! this
+                                          (>feed (.payload ^Injection r))
+                                          (inc n))
+                             (recur (feed) (inc n)))
+
+            ; The transform transformed, but returned a single value.
+            ; Proceed with the next step.
+            :else          (recur r (inc n))))
+
+        ; We reached the last of the pipeline steps without a special
+        ; value. Return the value upstream.
+        :else x)))
+
+  (pull! [this]
+    (loop []
+      (cond
+        ; There is a feed. Process inputs until a value is realized
+        ; at the end of the pipeline.
+        feed
+        (let [r (-process-input! this)]
+          (cond
+            ; Vaccum means we need more input to realize a value, but
+            ; there is not enough input available.
+            ; Escalate to upstream.
+            (vacuum? r) vacuum
+
+            ; A transformation asked to stop the pipeline processing.
+            ; Call the finish! methods of the pipeline steps, but
+            ; ignore any additional values. Return void upstream.
+            (stop? r)   (do
+                          (doseq [i (range step (alength pipes))]
+                            (finish! (aget pipes i)))
+                          void)
+
+            ; The current feed ran out of values. Pop the feed and
+            ; try again.
+            (void? r)   (do (-pop-feed! this) (recur))
+
+            ; We produced a regular value. Return it upstream.
+            :else       r))
+
+        ; There is no feed left. Even in the backlog. finish! the
+        ; pipeline steps and mop up any late values.
+        (< (.step pipeline) (alength pipes))
+        (do
+          (let [r (finish! (aget pipes step))]
+            (-bump-step! this)
+            (cond
+              ; There was either an injection or a singular value
+              ; produced by the finalizer of this step. Push the feed.
+              ; The values will be processed in the next iteration.
+              (injection? r) (-push-feed! this (>feed (.payload r)) step))
+              r              (-push-feed! this (>feed [r]) step))
+            ; In case nil was returned by the finalizer nothing
+            ; happens. In the next iteration the next finalizer
+            ; will be called.
+            (recur)))
+
+        ; We are done. All input feeds are exhausted and all
+        ; finalizers were called. Return void upstream.
+        :else void)))
 
 (defn >pipeline
   [pipes feed]
-  (APipeline. (>pipes pipes) feed 0 nil))
-
-(defn -process-input!
-  [^APipeline pipeline]
-  ; Get an input and start at the current step.
-  (loop [x ((.feed pipeline))
-         n (.step pipeline)]
-    (cond
-      ; We actually tried to read from the feed but there was
-      ; nothing available. That also means we talk about the
-      ; initial feed and the first pipeline step. Inner steps
-      ; may only inject values. Escalate to upstream.
-      (vacuum? x) vacuum
-
-      ; The input is void. So no further input in this feed.
-      ; Escalate to upstream.
-      (void? x)   void
-
-      ; There is some input and we got more steps left.
-      (< n (alength (.pipes pipeline)))
-      ; Run the transformation.
-      (let [r (process (aget (.pipes pipeline) n) x)]
-        (cond
-          ; The transformation requested to stop here.
-          ; Escalate upwards.
-          (stop? r)      stop
-
-          ; The transformation chose to elide the value.
-          ; Continue with the current step.
-          (void? r)      (recur ((.feed pipeline)) n)
-
-          ; The transformation wants to inject values. Eg. cat.
-          ; Push the current feed and step position in the backlog.
-          ; Continue with the injected feed and the next step.
-          (injection? r) (do
-                           (-push-feed! pipeline
-                                        (>feed (.payload ^Injection r))
-                                        (inc n))
-                           (recur ((.feed pipeline)) (inc n)))
-
-          ; The transform transformed, but returned a single value.
-          ; Proceed with the next step.
-          :else          (recur r (inc n))))
-
-      ; We reached the last of the pipeline steps without a special
-      ; value. Return the value upstream.
-      :else x)))
-
-(defn pull!
-  [^APipeline pipeline]
-  (loop []
-    (cond
-      ; There is a feed. Process inputs until a value is realized
-      ; at the end of the pipeline.
-      (.feed pipeline)
-      (let [r (-process-input! pipeline)]
-        (cond
-          ; Vaccum means we need more input to realize a value, but
-          ; there is not enough input available.
-          ; Escalate to upstream.
-          (vacuum? r) vacuum
-
-          ; A transformation asked to stop the pipeline processing.
-          ; Call the finish! methods of the pipeline steps, but
-          ; ignore any additional values. Return void upstream.
-          (stop? r)   (do
-                        (doseq [i (range (.step pipeline)
-                                         (alength (.pipes pipeline)))]
-                          (finish! (aget (.pipes pipeline) i)))
-                        void)
-
-          ; The current feed ran out of values. Pop the feed and
-          ; try again.
-          (void? r)   (do (-pop-feed! pipeline) (recur))
-
-          ; We produced a regular value. Return it upstream.
-          :else       r))
-
-      ; There is no feed left. Even in the backlog. finish! the
-      ; pipeline steps and mop up any late values.
-      (< (.step pipeline) (alength (.pipes pipeline)))
-      (do
-        (let [r (finish! (aget (.pipes pipeline) (.step pipeline)))]
-          (-bump-step! pipeline)
-          (cond
-            ; There was either an injection or a singular value
-            ; produced by the finalizer of this step. Push the feed.
-            ; The values will be processed in the next iteration.
-            (injection? r) (-push-feed! pipeline
-                                        (>feed (.payload r))
-                                        (.step pipeline))
-            r              (-push-feed! pipeline
-                                        (>feed [r])
-                                        (.step pipeline)))
-          ; In case nil was returned by the finalizer nothing
-          ; happens. In the next iteration the next finalizer
-          ; will be called.
-          (recur)))
-
-      ; We are done. All input feeds are exhausted and all
-      ; finalizers were called. Return void upstream.
-      :else void)))
+  (->APipeline (>pipes pipes) feed 0 nil))
 
 (defn transmute
   "Reduces the collection according to the reducing function f. Each

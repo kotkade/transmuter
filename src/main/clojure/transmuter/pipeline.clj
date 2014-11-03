@@ -54,7 +54,6 @@
   (pull!           [this])
   (-push-feed!     [this feed step])
   (-pop-feed!      [this])
-  (-bump-step!     [this])
   (-process-input! [this]))
 
 (deftype APipeline
@@ -74,10 +73,6 @@
       (set! feed f)
       (set! step s)
       (set! backlog (next backlog)))
-    nil)
-
-  (-bump-step! [this]
-    (set! step (inc step))
     nil)
 
   (-process-input! [this]
@@ -157,7 +152,7 @@
       (< step (alength pipes))
       (do
         (let [r (finish! (aget pipes step))]
-          (-bump-step! this)
+          (set! step (inc step))
           (cond
             ; There was either an injection or a singular value
             ; produced by the finalizer of this step. Push the feed.

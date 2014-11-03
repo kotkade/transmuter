@@ -27,7 +27,7 @@
   (->> pipes
     (map >pipe)
     flatten
-    vec))
+    (into-array Object)))
 
 (defprotocol Pipe
   (process [this x]
@@ -93,9 +93,9 @@
       (void? x)   void
 
       ; There is some input and we got more steps left.
-      (< n (count (.pipes pipeline)))
+      (< n (alength (.pipes pipeline)))
       ; Run the transformation.
-      (let [r (process (nth (.pipes pipeline) n) x)]
+      (let [r (process (aget (.pipes pipeline) n) x)]
         (cond
           ; The transformation requested to stop here.
           ; Escalate upwards.
@@ -141,8 +141,8 @@
           ; ignore any additional values. Return void upstream.
           (stop? r)   (do
                         (doseq [i (range (.step pipeline)
-                                         (count (.pipes pipeline)))]
-                          (finish! (nth (.pipes pipeline) i)))
+                                         (alength (.pipes pipeline)))]
+                          (finish! (aget (.pipes pipeline) i)))
                         void)
 
           ; The current feed ran out of values. Pop the feed and
@@ -154,9 +154,9 @@
 
       ; There is no feed left. Even in the backlog. finish! the
       ; pipeline steps and mop up any late values.
-      (< (.step pipeline) (count (.pipes pipeline)))
+      (< (.step pipeline) (alength (.pipes pipeline)))
       (do
-        (let [r (finish! (nth (.pipes pipeline) (.step pipeline)))]
+        (let [r (finish! (aget (.pipes pipeline) (.step pipeline)))]
           (-bump-step! pipeline)
           (cond
             ; There was either an injection or a singular value

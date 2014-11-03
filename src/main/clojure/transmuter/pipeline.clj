@@ -154,7 +154,7 @@
 
       ; There is no feed left. Even in the backlog. finish! the
       ; pipeline steps and mop up any late values.
-      (< (.step pipeline) (alength pipes))
+      (< step (alength pipes))
       (do
         (let [r (finish! (aget pipes step))]
           (-bump-step! this)

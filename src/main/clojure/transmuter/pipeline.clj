@@ -1,6 +1,7 @@
 (ns transmuter.pipeline
   (:refer-clojure
-    :exclude [sequence])
+    :exclude [sequence map cat mapcat filter remove
+              take take-while drop drop-while distinct])
   (:require
     [transmuter.feed :refer [>feed]]
     [transmuter.guard
@@ -8,15 +9,17 @@
   (:import
     transmuter.guard.Injection))
 
+(alias 'cc 'clojure.core)
+
 (defprotocol PipeDefinition
   (>pipe [this] "Initialize the pipe described by this definition."))
 
 (extend-protocol PipeDefinition
   clojure.lang.APersistentVector
-  (>pipe [this] (map >pipe this))
+  (>pipe [this] (cc/map >pipe this))
 
   clojure.lang.ISeq
-  (>pipe [this] (map >pipe this))
+  (>pipe [this] (cc/map >pipe this))
 
   clojure.lang.AFn
   (>pipe [this] (this))
@@ -27,7 +30,7 @@
 (defn >pipes
   [pipes]
   (->> pipes
-    (map >pipe)
+    (cc/map >pipe)
     flatten
     (into-array Object)))
 
@@ -201,3 +204,59 @@
                        (when-not (void? x)
                          (cons x (step))))))]
     (step)))
+
+(defmacro defstep
+  [name args & body]
+  `(defn ~name
+     ~args
+     (fn [] ~@body)))
+
+(defstep map [f] f)
+
+(defn cat
+  []
+  (fn [x] (Injection. x)))
+
+(defn mapcat
+  [f]
+  [(map f) cat])
+
+(defstep filter
+  [pred]
+  (fn [x] (if (pred x) x void)))
+
+(defn remove
+  [pred]
+  (filter (complement pred)))
+
+(defstep take
+  [n]
+  (let [vn (volatile! (dec n))]
+    (fn [x]
+      (if-not (neg? @vn)
+        (do (vswap! vn dec) x)
+        stop))))
+
+(defstep take-while
+  [pred]
+  (fn [x] (if (pred x) x stop)))
+
+(defstep drop
+  [n]
+  (let [vn (volatile! (dec n))]
+    (fn [x]
+      (if-not (neg? @vn)
+        (do (vswap! vn dec) void)
+        x))))
+
+(defstep drop-while
+  [pred]
+  (fn [x] (if (pred x) void x)))
+
+(defstep distinct
+  []
+  (let [seen? (volatile! #{})]
+    (fn [x]
+      (if-not (contains? @seen? x)
+        (do (vswap! seen? conj x) x)
+        void))))

@@ -150,23 +150,22 @@
       ; There is no feed left. Even in the backlog. finish! the
       ; pipeline steps and mop up any late values.
       (< step (alength pipes))
-      (do
-        (let [r (finish! (aget pipes step))]
-          (set! step (inc step))
-          (cond
-            ; There was either an injection or a singular value
-            ; produced by the finalizer of this step. Push the feed.
-            ; The values will be processed in the next iteration.
-            (injection? r) (-push-feed! this (>feed (.payload r)) step))
-            r              (-push-feed! this (>feed [r]) step))
-          ; In case nil was returned by the finalizer nothing
-          ; happens. In the next iteration the next finalizer
-          ; will be called.
-          (recur)))
+      (let [r (finish! (aget pipes step))]
+        (set! step (inc step))
+        (cond
+          ; There was either an injection or a singular value
+          ; produced by the finalizer of this step. Push the feed.
+          ; The values will be processed in the next iteration.
+          (injection? r) (-push-feed! this (>feed (.payload r)) step)
+          r              (-push-feed! this (>feed [r]) step))
+        ; In case nil was returned by the finalizer nothing
+        ; happens. In the next iteration the next finalizer
+        ; will be called.
+        (recur))
 
       ; We are done. All input feeds are exhausted and all
       ; finalizers were called. Return void upstream.
-      :else void))
+      :else void)))
 
 (defn >pipeline
   [pipes feed]

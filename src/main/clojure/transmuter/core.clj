@@ -5,7 +5,7 @@
   (:require
     [transmuter.feed :refer [>feed]]
     [transmuter.guard
-     :refer [vacuum vacuum? stop stop? void void? injection?]]
+     :refer [vacuum vacuum? stop stop? void void? ->Injection injection?]]
     [transmuter.pipeline :refer [>pipeline pull! Pipe]]
     [clojure.string :as string])
   (:import
@@ -82,58 +82,50 @@
                    (process [this# ~@(first process)] ~@(next process))
                    (finish! [this#] ~finish!)))))))
 
-(defmacro defstep
-  [name args & body]
-  `(defn ~name
-     ~args
-     (fn [] ~@body)))
+(defpipe map
+  [f]
+  :process ([x] (f x)))
 
-(defstep map [f] f)
-
-(defn cat
-  []
-  (fn [x] (Injection. x)))
+(def cat (map ->Injection))
 
 (defn mapcat
   [f]
   [(map f) cat])
 
-(defstep filter
+(defpipe filter
   [pred]
-  (fn [x] (if (pred x) x void)))
+  :process ([x] (if (pred x) x void)))
 
 (defn remove
   [pred]
   (filter (complement pred)))
 
-(defstep take
+(defpipe take
   [n]
-  (let [vn (volatile! (dec n))]
-    (fn [x]
-      (if-not (neg? @vn)
-        (do (vswap! vn dec) x)
-        stop))))
+  :state   [^:unsynchronized-mutable ^long n (dec n)]
+  :process ([x] (if-not (neg? n) (do (fswap! n dec) x) stop)))
 
-(defstep take-while
+(defpipe take-while
   [pred]
-  (fn [x] (if (pred x) x stop)))
+  :process ([x] (if (pred x) x stop)))
 
-(defstep drop
+(defpipe drop
   [n]
-  (let [vn (volatile! (dec n))]
-    (fn [x]
-      (if-not (neg? @vn)
-        (do (vswap! vn dec) void)
-        x))))
+  :state   [^:unsynchronized-mutable ^long n (dec n)]
+  :process ([x] (if-not (neg? n) (do (fswap! n dec) void) x)))
 
-(defstep drop-while
+(defpipe drop-while
   [pred]
-  (fn [x] (if (pred x) void x)))
+  :state   [pred pred
+            ^:unsynchronized-mutable drop? true]
+  :process ([x]
+             (when drop? (set! drop? (pred x)))
+             (if-not drop? x void)))
 
-(defstep distinct
+(defpipe distinct
   []
-  (let [seen? (volatile! #{})]
-    (fn [x]
-      (if-not (contains? @seen? x)
-        (do (vswap! seen? conj x) x)
-        void))))
+  :state   [^:unsynchronized-mutable seen? (transient {})]
+  :process ([x]
+             (if-not (seen? x)
+               (do (fswap! seen? assoc! x true) x)
+               void)))

@@ -6,9 +6,12 @@
     [transmuter.feed :refer [>feed]]
     [transmuter.guard
      :refer [vacuum vacuum? stop stop? void void? injection?]]
-    [transmuter.pipeline :refer [>pipeline pull!]])
+    [transmuter.pipeline :refer [>pipeline pull! Pipe]]
+    [clojure.string :as string])
   (:import
     transmuter.guard.Injection))
+
+(alias 'cc 'clojure.core)
 
 (defn transmute
   "Reduces the collection according to the reducing function f. Each
@@ -36,6 +39,48 @@
                        (when-not (void? x)
                          (cons x (step))))))]
     (step)))
+
+(defn ^:private >pipe-type
+  [s]
+  (-> s
+    name
+    (str "-pipe")
+    (.split "-")
+    (->>
+      (cc/map string/capitalize)
+      (apply str)
+      symbol)))
+
+(defmacro fswap!
+  [field f & args]
+  `(set! ~field (~f ~field ~@args)))
+
+(defn ^:private fn-tail
+  [body]
+  (if (string? (first body))
+    (list* (first body) (next body))
+    (list* nil body)))
+
+(defmacro defpipe
+  [pname & body]
+  (let [[docstring args & {:keys [state process finish!]}] (fn-tail body)
+        pname (vary-meta pname update-in [:doc] #(or % docstring))
+        wrap  (if (pos? (count args))
+                (fn [body] `(fn ~args (fn [] ~body)))
+                (fn [body] `(fn [] ~body)))]
+    (if state
+      (let [tname (>pipe-type pname)]
+        `(do
+           (deftype ~tname ~(vec (take-nth 2 state))
+             Pipe
+             (process [this# ~@(first process)] ~@(next process))
+             (finish! [this#] ~finish!))
+           (def ~pname
+             ~(wrap `(new ~tname ~@(take-nth 2 (next state)))))))
+      `(def ~pname
+         ~(wrap `(reify Pipe
+                   (process [this# ~@(first process)] ~@(next process))
+                   (finish! [this#] ~finish!)))))))
 
 (defmacro defstep
   [name args & body]

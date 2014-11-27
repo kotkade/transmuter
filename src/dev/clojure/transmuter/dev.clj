@@ -1,6 +1,7 @@
 (ns transmuter.dev
   (:require
     [clojure.tools.nrepl.server :as repl]
+    ccw.debug.serverrepl
     redl.core
     redl.complete))
 

@@ -98,7 +98,7 @@
 
             ; The transformation chose to elide the value.
             ; Continue with the current step.
-            (void? r)      (recur (feed) n)
+            (void? r)      (recur (feed) step)
 
             ; The transformation wants to inject values. Eg. cat.
             ; Push the current feed and step position in the backlog.

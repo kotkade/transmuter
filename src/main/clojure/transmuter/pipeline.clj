@@ -17,17 +17,15 @@
   (:import
     transmuter.guard.Injection))
 
-(alias 'cc 'clojure.core)
-
 (defprotocol PipeDefinition
   (>pipe [this] "Initialize the pipe described by this definition."))
 
 (extend-protocol PipeDefinition
   clojure.lang.APersistentVector
-  (>pipe [this] (cc/map >pipe this))
+  (>pipe [this] (map >pipe this))
 
   clojure.lang.ISeq
-  (>pipe [this] (cc/map >pipe this))
+  (>pipe [this] (map >pipe this))
 
   clojure.lang.AFn
   (>pipe [this] (this))
@@ -38,7 +36,7 @@
 (defn >pipes
   [pipes]
   (->> pipes
-    (cc/map >pipe)
+    (map >pipe)
     flatten
     (into-array Object)))
 
@@ -136,7 +134,7 @@
       feed
       (let [r (-process-input! this)]
         (cond
-          ; Vaccum means we need more input to realize a value, but
+          ; Vacuum means we need more input to realize a value, but
           ; there is not enough input available.
           ; Escalate to upstream.
           (vacuum? r) vacuum

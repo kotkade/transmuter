@@ -128,7 +128,7 @@
 (defpipe keep
   [f]
   :process ([x]
-             (let [r (f x)] 
+             (let [r (f x)]
                (if-not (nil? r)
                  r
                  void))))

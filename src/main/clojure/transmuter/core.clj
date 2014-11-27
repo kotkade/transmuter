@@ -1,6 +1,6 @@
 (ns transmuter.core
   (:refer-clojure
-    :exclude [sequence map cat mapcat filter remove
+    :exclude [sequence map cat mapcat filter remove sort
               take take-while drop drop-while distinct])
   (:require
     [transmuter.feed :refer [>feed]]
@@ -129,3 +129,9 @@
              (if-not (seen? x)
                (do (fswap! seen? assoc! x true) x)
                void)))
+
+(defpipe sort
+  []
+  :state   [^:unsynchronized-mutable v (transient [])]
+  :process ([x] (fswap! v conj! x) void)
+  :finish! (-> v persistent! cc/sort ->Injection))

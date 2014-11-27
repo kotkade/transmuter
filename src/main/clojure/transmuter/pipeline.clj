@@ -57,6 +57,7 @@
   [pipes
    ^:unsynchronized-mutable feed
    ^:unsynchronized-mutable step
+   ^:unsynchronized-mutable shutdown
    ^:unsynchronized-mutable backlog]
   Pipeline
   (-push-feed! [this f s]
@@ -93,8 +94,8 @@
         (let [r (process (aget pipes n) x)]
           (cond
             ; The transformation requested to stop here.
-            ; Escalate upwards.
-            (stop? r)      stop
+            ; Mark the stopping step and escalate upwards.
+            (stop? r)      (do (set! step n) stop)
 
             ; The transformation chose to elide the value.
             ; Continue with the current step.
@@ -130,12 +131,15 @@
           (vacuum? r) vacuum
 
           ; A transformation asked to stop the pipeline processing.
-          ; Call the finish! methods of the pipeline steps, but
-          ; ignore any additional values. Return void upstream.
+          ; Calling the finish! methods of the pipeline steps, but
+          ; ignore any additional values above the current position.
+          ; Recur to finish down the pipeline.
           (stop? r)   (do
-                        (doseq [i (range step (alength pipes))]
+                        (set! feed nil)
+                        (doseq [i (range shutdown step)]
                           (finish! (aget pipes i)))
-                        void)
+                        (set! shutdown step)
+                        (recur))
 
           ; The current feed ran out of values. Pop the feed and
           ; try again.
@@ -149,6 +153,7 @@
       (< step (alength pipes))
       (let [r (finish! (aget pipes step))]
         (set! step (inc step))
+        (set! shutdown step)
         (cond
           ; There was either an injection or a singular value
           ; produced by the finalizer of this step. Push the feed.
@@ -166,4 +171,4 @@
 
 (defn >pipeline
   [pipes feed]
-  (->APipeline (>pipes pipes) feed 0 nil))
+  (->APipeline (>pipes pipes) feed 0 0 nil))

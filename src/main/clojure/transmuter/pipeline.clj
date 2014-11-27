@@ -68,7 +68,7 @@
   (-pop-feed! [this]
     (let [[f s] (first backlog)]
       (set! feed f)
-      (set! step s)
+      (set! step (or s 0))
       (set! backlog (next backlog)))
     nil)
 

@@ -25,12 +25,12 @@
         pipeline (>pipeline pipes feed)
         output   (async/chan buf-or-n)]
     (async/go-loop [read? true]
-      (when read? (vreset! inputv (<! input)))
+      (when read? (vreset! inputv (async/<! input)))
       (let [r (pull! pipeline)]
         (cond
           (vacuum? r) (recur true)
           (void? r)   (do
                         (async/close! input)
                         (async/close! output))
-          :else       (do (>! output r) (recur false)))))
+          :else       (do (async/>! output r) (recur false)))))
     output))

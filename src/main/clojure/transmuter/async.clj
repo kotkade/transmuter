@@ -16,21 +16,24 @@
     [clojure.core.async :as async]))
 
 (defn chan
-  [input buf-or-n pipes]
-  (let [inputv   (volatile! vacuum)
-        feed     (fn []
-                   (let [i @inputv]
-                     (vreset! inputv vacuum)
-                     (if-not (nil? i) i void)))
-        pipeline (>pipeline pipes feed)
-        output   (async/chan buf-or-n)]
-    (async/go-loop [read? true]
-      (when read? (vreset! inputv (async/<! input)))
-      (let [r (pull! pipeline)]
-        (cond
-          (vacuum? r) (recur true)
-          (void? r)   (do
-                        (async/close! input)
-                        (async/close! output))
-          :else       (do (async/>! output r) (recur false)))))
-    output))
+  ([input pipes] (chan input 0 pipes))
+  ([input buf-or-n pipes]
+   (let [inputv   (volatile! vacuum)
+         feed     (fn []
+                    (let [i @inputv]
+                      (vreset! inputv vacuum)
+                      (if-not (nil? i) i void)))
+         pipeline (>pipeline pipes feed)
+         output   (async/chan buf-or-n)]
+     (async/go-loop [read? true]
+       (when read? (vreset! inputv (async/<! input)))
+       (let [r (pull! pipeline)]
+         (cond
+           (vacuum? r) (recur true)
+           (void? r)   (do
+                         (async/close! input)
+                         (async/close! output))
+           :else       (do
+                         (async/>! output r)
+                         (recur false)))))
+     output))

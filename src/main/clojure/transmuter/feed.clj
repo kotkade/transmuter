@@ -13,6 +13,7 @@
   (:import
     java.util.Iterator
     clojure.lang.ArrayChunk
+    clojure.lang.APersistentVector
     clojure.lang.IFn
     clojure.lang.ISeq
     clojure.lang.Seqable)
@@ -85,6 +86,9 @@
   (extend klass Source {:>feed f}))
 
 (extend-protocol Source
+  APersistentVector
+  (>feed [this] (>chunked-seq-feed (seq this)))
+
   Object
   (>feed [this]
     (cond

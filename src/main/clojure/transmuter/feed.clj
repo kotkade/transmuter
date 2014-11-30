@@ -81,6 +81,21 @@
       (>chunked-seq-feed s)
       (>seq-feed s))))
 
+(deftype ArrayFeed [array
+                    ^:unsynchronized-mutable ^long idx]
+  IFn
+  (invoke [this]
+    (if (< idx (alength array))
+      (do
+        (let [v (aget array idx)]
+          (-fswap! idx inc)
+          v))
+      void)))
+
+(defn >array-feed
+  [array]
+  (->ArrayFeed array 0))
+
 (defn ^:private -extend-feed
   [klass f]
   (extend klass Source {:>feed f}))
@@ -92,6 +107,7 @@
   Object
   (>feed [this]
     (cond
+      (.isArray (class this))   (-extend-feed (class this) >array-feed)
       (instance? Iterator this) (-extend-feed (class this) >iterator-feed)
       (instance? Iterable this) (-extend-feed (class this) >iterable-feed)
       (instance? ISeq this)     (-extend-feed (class this) >seq-feed)

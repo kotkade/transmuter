@@ -14,6 +14,7 @@
     java.util.Iterator
     clojure.lang.ArrayChunk
     clojure.lang.APersistentVector
+    clojure.lang.ChunkedCons
     clojure.lang.IFn
     clojure.lang.ISeq
     clojure.lang.Seqable)
@@ -41,45 +42,39 @@
   [^Iterable this]
   (>iterator-feed (.iterator this)))
 
-(deftype SeqFeed [^:unsynchronized-mutable s]
-  IFn
-  (invoke [this]
-    (if (-fswap! s seq)
-      (let [f (first s)]
-        (-fswap! s rest)
-        f)
-      void)))
-
-(def >seq-feed ->SeqFeed)
-
-(deftype ChunkedSeqFeed [^:unsynchronized-mutable cs
-                         ^:unsynchronized-mutable ^ArrayChunk current-chunk
-                         ^:unsynchronized-mutable ^long idx
-                         ^:unsynchronized-mutable ^long end]
+(deftype SeqFeed [^:unsynchronized-mutable s
+                  ^:unsynchronized-mutable ^ArrayChunk current-chunk
+                  ^:unsynchronized-mutable ^long idx
+                  ^:unsynchronized-mutable ^long end]
   IFn
   (invoke [this]
     (cond
-      (< idx end)      (let [v (.nth current-chunk idx)]
-                         (-fswap! idx inc)
-                         v)
-      (-fswap! cs seq) (do
-                         (set! current-chunk (chunk-first cs))
-                         (set! idx 0)
-                         (set! end (.count current-chunk))
-                         (-fswap! cs chunk-rest)
-                         (recur))
+      current-chunk   (if (< idx end)
+                         (let [v (.nth current-chunk idx)]
+                           (-fswap! idx inc)
+                           v)
+                         (do
+                           (set! current-chunk nil)
+                           (recur)))
+      (-fswap! s seq) (if (chunked-seq? s)
+                        (do
+                          (set! current-chunk (chunk-first s))
+                          (set! idx 0)
+                          (set! end (long (.count current-chunk)))
+                          (-fswap! s chunk-rest)
+                          (recur))
+                        (let [v (first s)]
+                          (-fswap! s rest)
+                          v))
       :else void)))
 
-(defn >chunked-seq-feed
-  [cs]
-  (->ChunkedSeqFeed cs nil 0 0))
+(defn >seq-feed
+  [s]
+  (->SeqFeed s nil 0 0))
 
 (defn >seqable-feed
   [coll]
-  (let [s (seq coll)]
-    (if (chunked-seq? s)
-      (>chunked-seq-feed s)
-      (>seq-feed s))))
+  (>seq-feed (seq coll)))
 
 (deftype ArrayFeed [array
                     ^:unsynchronized-mutable ^long idx]
@@ -102,7 +97,10 @@
 
 (extend-protocol Source
   APersistentVector
-  (>feed [this] (>chunked-seq-feed (seq this)))
+  (>feed [this] (>seq-feed (seq this)))
+
+  ChunkedCons
+  (>feed [this] (>seq-feed (seq this)))
 
   Object
   (>feed [this]

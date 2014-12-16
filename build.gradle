@@ -11,7 +11,7 @@ buildscript {
     }
 }
 
-version = "0.1.0-SNAPSHOT"
+version = "0.1.0"
 group   = "de.kotka"
 
 description = "Transducer with a mutation"

@@ -11,7 +11,7 @@
 
 (ns transmuter.pipeline
   (:require
-    [transmuter.feed :refer [>feed]]
+    [transmuter.feed :refer [>feed <value]]
     [transmuter.guard
      :refer [vacuum vacuum? stop stop? void void? injection?]])
   (:import
@@ -84,7 +84,7 @@
 
   (-process-input! [this]
     ; Get an input and start at the current step.
-    (loop [x (feed)
+    (loop [x (<value feed)
            n step]
       (cond
         ; We actually tried to read from the feed but there was
@@ -108,7 +108,7 @@
 
             ; The transformation chose to elide the value.
             ; Continue with the current step.
-            (void? r)      (recur (feed) step)
+            (void? r)      (recur (<value feed) step)
 
             ; The transformation wants to inject values. Eg. cat.
             ; Push the current feed and step position in the backlog.
@@ -117,7 +117,7 @@
                              (-push-feed! this
                                           (>feed (.payload ^Injection r))
                                           (inc n))
-                             (recur (feed) (inc n)))
+                             (recur (<value feed) (inc n)))
 
             ; The transform transformed, but returned a single value.
             ; Proceed with the next step.

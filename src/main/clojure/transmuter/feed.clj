@@ -26,17 +26,20 @@
   `(set! ~v (~f ~v ~@args)))
 
 (defprotocol Source
-  (>feed [this] "Create a feed from the given input source. A feed is a
-  procedure, which either returns the next value from the source,
-  guard/vacuum when a new value is not yet available or guard/void
-  if the input source is exhausted."))
+  (>feed [this] "Create a feed from the given input source."))
+
+(defprotocol Feed
+  (<value [this]
+  "Read one value from the feed, guard/vacuum when a new value is not
+  yet available or guard/void if the input source is exhausted."))
 
 (defn >iterator-feed
   [^Iterator iter]
-  (fn []
-    (if (.hasNext iter)
-      (.next iter)
-      void)))
+  (reify Feed
+    (<value [this]
+      (if (.hasNext iter)
+        (.next iter)
+        void))))
 
 (defn >iterable-feed
   [^Iterable this]
@@ -46,8 +49,8 @@
                   ^:unsynchronized-mutable ^ArrayChunk current-chunk
                   ^:unsynchronized-mutable ^long idx
                   ^:unsynchronized-mutable ^long end]
-  IFn
-  (invoke [this]
+  Feed
+  (<value [this]
     (cond
       current-chunk   (if (< idx end)
                          (let [v (.nth current-chunk idx)]
@@ -78,8 +81,8 @@
 
 (deftype ArrayFeed [array
                     ^:unsynchronized-mutable ^long idx]
-  IFn
-  (invoke [this]
+  Feed
+  (<value [this]
     (if (< idx (alength array))
       (do
         (let [v (aget array idx)]

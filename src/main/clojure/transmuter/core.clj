@@ -20,6 +20,7 @@
               drop-while
               filter
               interpose
+              into
               keep
               keep-indexed
               map
@@ -77,6 +78,22 @@
                        (when-not (void? x)
                          (cons x (step))))))]
     (step)))
+
+(defn into
+  "Returns a new collection consisting of coll with all of the
+  items of the input conjoined. Each input value is transformed
+  by the given pipes."
+  [coll pipes input]
+  (let [f (if (instance? clojure.lang.IEditableCollection coll)
+            (fn
+              ([]      (transient coll))
+              ([acc]   (with-meta (persistent! acc) (meta coll)))
+              ([acc x] (conj! acc x)))
+            (fn
+              ([]      coll)
+              ([acc]   acc)
+              ([acc x] (conj acc x))))]
+    (transmute pipes f input)))
 
 (defn ^:private >pipe-type
   [s]

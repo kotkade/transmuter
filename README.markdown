@@ -95,6 +95,7 @@ Via gradle:
     
     dependencies {
         compile "de.kotka:transmuter:0.1.0"
+    }
 
 Via maven:
 

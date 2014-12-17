@@ -63,7 +63,7 @@
   (-process-input! [this]))
 
 (deftype APipeline
-  [pipes
+  [^objects pipes
    ^:unsynchronized-mutable feed
    ^:unsynchronized-mutable step
    ^:unsynchronized-mutable shutdown
@@ -167,7 +167,7 @@
           ; There was either an injection or a singular value
           ; produced by the finalizer of this step. Push the feed.
           ; The values will be processed in the next iteration.
-          (injection? r) (-push-feed! this (>feed (.payload r)) step)
+          (injection? r) (-push-feed! this (>feed (.payload ^Injection r)) step)
           r              (-push-feed! this (>feed [r]) step))
         ; In case nil was returned by the finalizer nothing
         ; happens. In the next iteration the next finalizer

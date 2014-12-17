@@ -79,7 +79,7 @@
   [coll]
   (>seq-feed (seq coll)))
 
-(deftype ArrayFeed [array
+(deftype ArrayFeed [^objects array
                     ^:unsynchronized-mutable ^long idx]
   Feed
   (<value [this]

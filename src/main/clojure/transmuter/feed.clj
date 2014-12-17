@@ -133,8 +133,8 @@
     (cond
       (.isArray (class this))   (-extend-feed (class this) >objects-array-feed)
       (instance? Iterator this) (-extend-feed (class this) >iterator-feed)
-      (instance? Iterable this) (-extend-feed (class this) >iterable-feed)
       (instance? ISeq this)     (-extend-feed (class this) >seq-feed)
+      (instance? Iterable this) (-extend-feed (class this) >iterable-feed)
       (instance? Seqable this)  (-extend-feed (class this) >seqable-feed)
       :else (throw (ex-info "Don't know how to create feed from class"
                             {:class (class this)})))

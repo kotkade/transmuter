@@ -19,7 +19,8 @@
     clojure.lang.ISeq
     clojure.lang.Seqable)
   (:require
-    [transmuter.guard :refer [void vacuum]]))
+    [transmuter.guard :refer [void vacuum]]
+    [clojure.string :as string]))
 
 (defmacro ^:private -fswap!
   [v f & args]
@@ -79,20 +80,42 @@
   [coll]
   (>seq-feed (seq coll)))
 
-(deftype ArrayFeed [^objects array
-                    ^:unsynchronized-mutable ^long idx]
-  Feed
-  (<value [this]
-    (if (< idx (alength array))
-      (do
-        (let [v (aget array idx)]
-          (-fswap! idx inc)
-          v))
-      void)))
+(defmacro defarrayfeed
+  [elem-type]
+  (let [elem-type-name (name elem-type)
+        feed-type      (-> elem-type-name
+                         string/capitalize
+                         (str "ArrayFeed")
+                         symbol)
+        ctor-name      (symbol (str ">" elem-type-name "-array-feed"))
+        prototype      (symbol (str (subs elem-type-name
+                                          0 (dec (count elem-type-name)))
+                                    "-array"))]
+    `(do
+       (deftype ~feed-type
+         [~(with-meta 'array {:tag elem-type})
+          ~(with-meta 'idx {:tag 'long :unsynchronized-mutable true})]
+         Feed
+         (<value [this#]
+           (if (< ~'idx (alength ~'array))
+             (do
+               (let [v# (aget ~'array ~'idx)]
+                 (-fswap! ~'idx inc)
+                 v#))
+             void)))
+       (defn ~ctor-name
+         [array#]
+         (~(symbol (str "->" feed-type)) array# 0))
+       (extend (class (~prototype 0))
+         Source {:>feed ~ctor-name}))))
 
-(defn >array-feed
-  [array]
-  (->ArrayFeed array 0))
+(defarrayfeed objects)
+(defarrayfeed bytes)
+(defarrayfeed chars)
+(defarrayfeed ints)
+(defarrayfeed longs)
+(defarrayfeed floats)
+(defarrayfeed doubles)
 
 (defn ^:private -extend-feed
   [klass f]
@@ -108,7 +131,7 @@
   Object
   (>feed [this]
     (cond
-      (.isArray (class this))   (-extend-feed (class this) >array-feed)
+      (.isArray (class this))   (-extend-feed (class this) >objects-array-feed)
       (instance? Iterator this) (-extend-feed (class this) >iterator-feed)
       (instance? Iterable this) (-extend-feed (class this) >iterable-feed)
       (instance? ISeq this)     (-extend-feed (class this) >seq-feed)

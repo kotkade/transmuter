@@ -48,6 +48,7 @@ dependencies {
     development "org.clojure:tools.nrepl:0.2.6"
     development "redl:redl:0.2.4"
     development "ccw:ccw.server:0.1.1"
+    development "criterium:criterium:0.4.3"
 
     provided "org.clojure:core.async:0.1.346.0-17112a-alpha"
 }

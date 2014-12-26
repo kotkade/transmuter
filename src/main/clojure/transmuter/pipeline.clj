@@ -32,13 +32,6 @@
   (>pipe [this feed] feed))
 
 (defprotocol Pipe
-  (<feed   [this]
-  "Returns the next input value for this pipe step.")
-  (process [this x]
-  "Process the given value and return a result. May return
-  void to ignore the processed value, an Injection to explode
-  the processed value into several or stop to stop processing
-  any further values.")
   (stop! [this]
   "Stop this pipe step and its feed unconditionally and don't
   do any further processing. This is called only internally
@@ -50,14 +43,10 @@
 
 (extend-protocol Pipe
   Object
-  (<feed   [this]   nil)
-  (process [this x] x)
   (stop!   [this]   nil)
   (finish! [this]   nil)
 
   nil
-  (<feed   [this]   nil)
-  (process [this x] x)
   (stop!   [this]   nil)
   (finish! [this]   nil))
 
@@ -97,10 +86,14 @@
 
 (defmacro defpipe
   [pname & body]
-  (let [[docstring args & {:keys [state <feed process stop! finish!]}]
+  (let [[docstring args & {:keys [state feed process stop! finish!]}]
         (fn-tail body)
-        <feed        (or <feed `(<value ~'feed))
-        process      (or process `([value#] value#))
+        feed         (or feed `(<value ~'feed))
+        value        (gensym "value_")
+        process      (when process
+                       (fn [value-sym]
+                         `(let ~(conj (first process) value-sym)
+                            ~@(next process))))
         state-defs   (take-nth 2 state)
         state-locals (map #(with-meta % nil) state-defs)
         state-inits  (take-nth 2 (next state))
@@ -113,29 +106,23 @@
        (deftype ~tname
          ~(into '[^:unsynchronized-mutable feed] state-defs)
          Pipe
-         (<feed   [this#] ~(or <feed `(<value ~'feed)))
-         (process [this# ~@(first process)] ~@(next process))
          (stop!   [this#] (stop! ~'feed) ~stop!)
          (finish! [this#] (set! ~'feed nil) (stop! this#) ~finish!)
          Feed
          (<value [this#]
-           (let [value# (<feed this#)]
-             (cond
-               (void? value#)
-               (if-let [final-value# (finish! ~'feed)]
-                 (do
-                   (set! ~'feed (>feed final-value#))
-                   (recur))
-                 void)
-
-               (stop? value#)            void
-               (contains? guards value#) value#
-
-               :else
-               (let [inner-value# (process this# value#)]
-                 (if (void? inner-value#)
-                   (recur)
-                   inner-value#))))))
+           (let [~value ~feed]
+             (condp identical? ~value
+               void   (if-let [final-value# (finish! ~'feed)]
+                        (do (set! ~'feed (>feed final-value#)) (recur))
+                        void)
+               stop   void
+               vacuum vacuum
+               ~(if process
+                  `(let [inner-value# ~(process value)]
+                     (if (identical? void inner-value#)
+                       (recur)
+                       inner-value#))
+                  value)))))
        (def ~pname
          ~(wrap
             `(fn [input#]

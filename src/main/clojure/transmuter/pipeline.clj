@@ -11,173 +11,133 @@
 
 (ns transmuter.pipeline
   (:require
-    [transmuter.feed :refer [>feed <value]]
-    [transmuter.guard
-     :refer [vacuum vacuum? stop stop? void void? injection?]])
-  (:import
-    transmuter.guard.Injection))
+    [transmuter.feed :refer [<value >feed Feed]]
+    [transmuter.guard :refer [void? void stop? stop guards]]
+    [clojure.string :as string]))
 
 (defprotocol PipeDefinition
-  (>pipe [this] "Initialize the pipe described by this definition."))
+  (>pipe [this feed] "Initialize the pipe described by this definition."))
 
 (extend-protocol PipeDefinition
   clojure.lang.APersistentVector
-  (>pipe [this] (map >pipe this))
+  (>pipe [this feed] (>pipe (seq this) feed))
 
   clojure.lang.ISeq
-  (>pipe [this] (map >pipe this))
+  (>pipe [this feed] (reduce #(>pipe %2 %1) feed this))
 
   clojure.lang.AFn
-  (>pipe [this] (this))
+  (>pipe [this feed] (this feed))
 
   nil
-  (>pipe [this] nil))
-
-(defn >pipes
-  [pipes]
-  (->> pipes
-    (map >pipe)
-    flatten
-    (into-array Object)))
+  (>pipe [this feed] feed))
 
 (defprotocol Pipe
+  (<feed   [this]
+  "Returns the next input value for this pipe step.")
   (process [this x]
   "Process the given value and return a result. May return
   void to ignore the processed value, an Injection to explode
   the processed value into several or stop to stop processing
   any further values.")
+  (stop! [this]
+  "Stop this pipe step and its feed unconditionally and don't
+  do any further processing. This is called only internally
+  and should not be used directly by the user!")
   (finish! [this]
   "Called after the last value is processed. May return nil,
   a final value or a final Injection with additional values.
   Must be called once and only once."))
 
 (extend-protocol Pipe
-  clojure.lang.AFn
-  (process [this x] (this x))
+  Object
+  (<feed   [this]   nil)
+  (process [this x] x)
+  (stop!   [this]   nil)
+  (finish! [this]   nil)
+
+  nil
+  (<feed   [this]   nil)
+  (process [this x] x)
+  (stop!   [this]   nil)
   (finish! [this]   nil))
 
-(defprotocol Pipeline
-  (pull!           [this])
-  (-push-feed!     [this feed step])
-  (-pop-feed!      [this])
-  (-process-input! [this]))
-
-(deftype APipeline
-  [^objects pipes
-   ^:unsynchronized-mutable feed
-   ^:unsynchronized-mutable step
-   ^:unsynchronized-mutable shutdown
-   ^:unsynchronized-mutable backlog]
-  Pipeline
-  (-push-feed! [this f s]
-    (set! backlog (conj backlog [feed step]))
-    (set! feed f)
-    (set! step s)
-    nil)
-
-  (-pop-feed! [this]
-    (let [[f s] (first backlog)]
-      (set! feed f)
-      (set! step (or s 0))
-      (set! backlog (next backlog)))
-    nil)
-
-  (-process-input! [this]
-    ; Get an input and start at the current step.
-    (loop [x (<value feed)
-           n step]
+(deftype Pipeline [^:unsynchronized-mutable inner-pipe]
+  Feed
+  (<value [this]
+    (let [value (<value inner-pipe)]
       (cond
-        ; We actually tried to read from the feed but there was
-        ; nothing available. That also means we talk about the
-        ; initial feed and the first pipeline step. Inner steps
-        ; may only inject values. Escalate to upstream.
-        (vacuum? x) vacuum
-
-        ; The input is void. So no further input in this feed.
-        ; Escalate to upstream.
-        (void? x)   void
-
-        ; There is some input and we got more steps left.
-        (< n (alength pipes))
-        ; Run the transformation.
-        (let [r (process (aget pipes n) x)]
-          (cond
-            ; The transformation requested to stop here.
-            ; Mark the stopping step and escalate upwards.
-            (stop? r)      (do (set! step n) stop)
-
-            ; The transformation chose to elide the value.
-            ; Continue with the current step.
-            (void? r)      (recur (<value feed) step)
-
-            ; The transformation wants to inject values. Eg. cat.
-            ; Push the current feed and step position in the backlog.
-            ; Continue with the injected feed and the next step.
-            (injection? r) (do
-                             (-push-feed! this
-                                          (>feed (.payload ^Injection r))
-                                          (inc n))
-                             (recur (<value feed) (inc n)))
-
-            ; The transform transformed, but returned a single value.
-            ; Proceed with the next step.
-            :else          (recur r (inc n))))
-
-        ; We reached the last of the pipeline steps without a special
-        ; value. Return the value upstream.
-        :else x)))
-
-  (pull! [this]
-    (cond
-      ; There is a feed. Process inputs until a value is realized
-      ; at the end of the pipeline.
-      feed
-      (let [r (-process-input! this)]
-        (cond
-          ; Vacuum means we need more input to realize a value, but
-          ; there is not enough input available.
-          ; Escalate to upstream.
-          (vacuum? r) vacuum
-
-          ; A transformation asked to stop the pipeline processing.
-          ; Calling the finish! methods of the pipeline steps, but
-          ; ignore any additional values above the current position.
-          ; Recur to finish down the pipeline.
-          (stop? r)   (do
-                        (set! feed nil)
-                        (doseq [i (range shutdown step)]
-                          (finish! (aget pipes i)))
-                        (set! shutdown step)
-                        (recur))
-
-          ; The current feed ran out of values. Pop the feed and
-          ; try again.
-          (void? r)   (do (-pop-feed! this) (recur))
-
-          ; We produced a regular value. Return it upstream.
-          :else       r))
-
-      ; There is no feed left. Even in the backlog. finish! the
-      ; pipeline steps and mop up any late values.
-      (< step (alength pipes))
-      (let [r (finish! (aget pipes step))]
-        (set! step (inc step))
-        (set! shutdown step)
-        (cond
-          ; There was either an injection or a singular value
-          ; produced by the finalizer of this step. Push the feed.
-          ; The values will be processed in the next iteration.
-          (injection? r) (-push-feed! this (>feed (.payload ^Injection r)) step)
-          r              (-push-feed! this (>feed [r]) step))
-        ; In case nil was returned by the finalizer nothing
-        ; happens. In the next iteration the next finalizer
-        ; will be called.
-        (recur))
-
-      ; We are done. All input feeds are exhausted and all
-      ; finalizers were called. Return void upstream.
-      :else void)))
+        (void? value) (if-let [final-values (finish! inner-pipe)]
+                        (do
+                          (set! inner-pipe (>feed final-values))
+                          (recur))
+                        void)
+        (stop? value) void
+        :else value))))
 
 (defn >pipeline
-  [pipes feed]
-  (->APipeline (>pipes pipes) feed 0 0 nil))
+  [pipes input]
+  (->Pipeline (>pipe pipes input)))
+
+(defn ^:private >pipe-type
+  [s]
+  (-> s
+    name
+    (str "-pipe")
+    (.split "-")
+    (->>
+      (map string/capitalize)
+      (apply str)
+      symbol)))
+
+(defn ^:private fn-tail
+  [body]
+  (if (string? (first body))
+    (list* (first body) (next body))
+    (list* nil body)))
+
+(defmacro defpipe
+  [pname & body]
+  (let [[docstring args & {:keys [state <feed process stop! finish!]}]
+        (fn-tail body)
+        <feed        (or <feed `(<value ~'feed))
+        process      (or process `([value#] value#))
+        state-defs   (take-nth 2 state)
+        state-locals (map #(with-meta % nil) state-defs)
+        state-inits  (take-nth 2 (next state))
+        pname        (vary-meta pname update-in [:doc] (fnil identity docstring))
+        wrap         (if (pos? (count args))
+                       (fn [body] `(fn ~args ~body))
+                       (fn [body] body))
+        tname        (>pipe-type pname)]
+    `(do
+       (deftype ~tname
+         ~(into '[^:unsynchronized-mutable feed] state-defs)
+         Pipe
+         (<feed   [this#] ~(or <feed `(<value ~'feed)))
+         (process [this# ~@(first process)] ~@(next process))
+         (stop!   [this#] (stop! ~'feed) ~stop!)
+         (finish! [this#] (set! ~'feed nil) (stop! this#) ~finish!)
+         Feed
+         (<value [this#]
+           (let [value# (<feed this#)]
+             (cond
+               (void? value#)
+               (if-let [final-value# (finish! ~'feed)]
+                 (do
+                   (set! ~'feed (>feed final-value#))
+                   (recur))
+                 void)
+
+               (stop? value#)            void
+               (contains? guards value#) value#
+
+               :else
+               (let [inner-value# (process this# value#)]
+                 (if (void? inner-value#)
+                   (recur)
+                   inner-value#))))))
+       (def ~pname
+         ~(wrap
+            `(fn [input#]
+               (let ~(vec (interleave state-locals state-inits))
+                 (new ~tname input# ~@state-locals))))))))

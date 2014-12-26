@@ -15,6 +15,8 @@
 (def void (Object.))
 (def vacuum (Object.))
 
+(def guards #{stop void vacuum})
+
 (defn stop?
   [this]
   (identical? this stop))
@@ -26,9 +28,3 @@
 (defn vacuum?
   [this]
   (identical? this vacuum))
-
-(deftype Injection [payload])
-
-(defn injection?
-  [this]
-  (instance? Injection this))

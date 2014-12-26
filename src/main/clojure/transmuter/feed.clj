@@ -34,6 +34,13 @@
   "Read one value from the feed, guard/vacuum when a new value is not
   yet available or guard/void if the input source is exhausted."))
 
+(extend-protocol Feed
+  Object
+  (<value [this] void)
+
+  nil
+  (<value [this] void))
+
 (defn >iterator-feed
   [^Iterator iter]
   (reify Feed
@@ -142,4 +149,3 @@
 
   nil
   (>feed [this] (constantly void)))
-

@@ -41,13 +41,11 @@
               take-nth
               take-while])
   (:require
-    [transmuter.feed :refer [>feed]]
+    [transmuter.feed :refer [<value >feed]]
     [transmuter.guard
-     :refer [vacuum vacuum? stop stop? void void? ->Injection injection?]]
-    [transmuter.pipeline :refer [>pipeline pull! Pipe]]
-    [clojure.string :as string])
+     :refer [vacuum vacuum? stop stop? void void? guards]]
+    [transmuter.pipeline :refer [>pipeline defpipe]])
   (:import
-    transmuter.guard.Injection
     clojure.lang.PersistentQueue))
 
 (alias 'cc 'clojure.core)
@@ -62,7 +60,7 @@
   [pipes f coll]
   (let [pipeline (>pipeline pipes (>feed coll))]
     (loop [acc (f)]
-      (let [x (pull! pipeline)]
+      (let [x (<value pipeline)]
         (if-not (void? x)
           (recur (f acc x))
           (f acc))))))
@@ -74,7 +72,7 @@
   (let [pipeline (>pipeline pipes (>feed coll))
         step     (fn step []
                    (lazy-seq
-                     (let [x (pull! pipeline)]
+                     (let [x (<value pipeline)]
                        (when-not (void? x)
                          (cons x (step))))))]
     (step)))
@@ -95,50 +93,13 @@
               ([acc x] (conj acc x))))]
     (transmute pipes f input)))
 
-(defn ^:private >pipe-type
-  [s]
-  (-> s
-    name
-    (str "-pipe")
-    (.split "-")
-    (->>
-      (cc/map string/capitalize)
-      (apply str)
-      symbol)))
-
 (defmacro fswap!
   [field f & args]
   `(set! ~field (~f ~field ~@args)))
 
-(defn ^:private fn-tail
-  [body]
-  (if (string? (first body))
-    (list* (first body) (next body))
-    (list* nil body)))
-
-(defmacro defpipe
-  [pname & body]
-  (let [[docstring args & {:keys [state process finish!]}] (fn-tail body)
-        pname (vary-meta pname update-in [:doc] #(or % docstring))
-        wrap  (if (pos? (count args))
-                (fn [body] `(fn ~args (fn [] ~body)))
-                (fn [body] `(fn [] ~body)))]
-    (if state
-      (let [tname (>pipe-type pname)]
-        `(do
-           (deftype ~tname ~(vec (cc/take-nth 2 state))
-             Pipe
-             (process [this# ~@(first process)] ~@(next process))
-             (finish! [this#] ~finish!))
-           (def ~pname
-             ~(wrap `(new ~tname ~@(cc/take-nth 2 (next state)))))))
-      `(def ~pname
-         ~(wrap `(reify Pipe
-                   (process [this# ~@(first process)] ~@(next process))
-                   (finish! [this#] ~finish!)))))))
-
 (defpipe map
   [f]
+  :state   [f f]
   :process ([x] (f x)))
 
 (defpipe map-indexed
@@ -147,7 +108,16 @@
             ^:unsynchronized-mutable ^long n -1]
   :process ([x] (f (fswap! n inc) x)))
 
-(def cat (map ->Injection))
+(defpipe cat
+  []
+  :state [^:unsynchronized-mutable inner-feed nil]
+  :<feed (let [v (<value inner-feed)]
+           (if (void? v)
+             (let [iv (<value feed)]
+               (if-not (contains? guards iv)
+                 (do (set! inner-feed (>feed iv)) (recur))
+                 iv))
+             v)))
 
 (defn mapcat
   [f]
@@ -155,6 +125,7 @@
 
 (defpipe keep
   [f]
+  :state   [f f]
   :process ([x]
              (let [r (f x)]
                (if-not (nil? r)
@@ -173,6 +144,7 @@
 
 (defpipe filter
   [pred]
+  :state   [pred pred]
   :process ([x] (if (pred x) x void)))
 
 (defn remove
@@ -203,10 +175,11 @@
                (fswap! batch pop))
              (fswap! batch conj x)
              void)
-  :finish! (->Injection batch))
+  :finish! (seq batch))
 
 (defpipe take-while
   [pred]
+  :state   [pred pred]
   :process ([x] (if (pred x) x stop)))
 
 (defpipe drop
@@ -252,12 +225,11 @@
 
 (defpipe interpose
   [elem]
-  :state   [elem elem
-            ^:unsynchronized-mutable first? true]
-  :process ([x]
-             (if first?
-               (do (set! first? false) x)
-               (->Injection [elem x]))))
+  :state [elem elem
+          ^:unsynchronized-mutable feed? false]
+  :<feed (do
+           (fswap! feed? not)
+           (if feed? (<value feed) elem)))
 
 (defpipe butlast
   []
@@ -271,30 +243,31 @@
   []
   :state   [^:unsynchronized-mutable v (transient [])]
   :process ([x] (fswap! v conj! x) void)
-  :finish! (-> v persistent! cc/sort ->Injection))
+  :finish! (-> v persistent! cc/sort))
 
 (defpipe sort-by
-  [& sort-args]
+  [sort-args]
   :state   [sorter (apply partial cc/sort-by sort-args)
             ^:unsynchronized-mutable v (transient [])]
   :process ([x] (fswap! v conj! x) void)
-  :finish! (-> v persistent! sorter ->Injection))
+  :finish! (-> v persistent! sorter))
 
 (defpipe replace
   [replacements]
+  :state   [replacements replacements]
   :process ([x] (get replacements x x)))
 
 (defpipe reverse
   []
   :state   [^:unsynchronized-mutable v (transient [])]
   :process ([x] (fswap! v conj! x) void)
-  :finish! (-> v persistent! rseq ->Injection))
+  :finish! (-> v persistent! rseq))
 
 (defpipe shuffle
   []
   :state   [^:unsynchronized-mutable v (transient [])]
   :process ([x] (fswap! v conj! x) void)
-  :finish! (-> v persistent! cc/shuffle ->Injection))
+  :finish! (-> v persistent! cc/shuffle))
 
 (defpipe full-partition
   [n pad all?]
@@ -322,7 +295,7 @@
             ^:unsynchronized-mutable history PersistentQueue/EMPTY
             ^:unsynchronized-mutable batch   (transient [])]
   :process ([x]
-             (when (=(count history) offset)
+             (when (= (count history) offset)
                (fswap! history pop))
              (fswap! history conj x)
              (fswap! batch conj! x)

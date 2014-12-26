@@ -224,12 +224,19 @@
                void)))
 
 (defpipe interpose
-  [elem]
-  :state [elem elem
-          ^:unsynchronized-mutable feed? false]
-  :<feed (do
-           (fswap! feed? not)
-           (if feed? (<value feed) elem)))
+  [sep]
+  :state [sep sep
+          ^:unsynchronized-mutable first? false
+          ^:unsynchronized-mutable elem void]
+  :feed  (cond
+           first?                 (do (set! first? false) (<value feed))
+           (identical? elem void) (let [e (<value feed)]
+                                    (condp identical? e
+                                      void   void
+                                      stop   stop
+                                      vacuum vacuum
+                                      (do (set! elem e) sep)))
+           :else                  (let [e elem] (set! elem void) e)))
 
 (defpipe butlast
   []

@@ -30,6 +30,7 @@
               partition-all
               partition-by
               remove
+              repeat
               replace
               reverse
               sequence
@@ -41,9 +42,9 @@
               take-nth
               take-while])
   (:require
-    [transmuter.feed     :refer [<value >feed]]
+    [transmuter.feed     :refer [<value >feed Feed]]
     [transmuter.guard    :refer [vacuum stop void]]
-    [transmuter.pipeline :refer [>pipeline defpipe]])
+    [transmuter.pipeline :refer [>pipeline defpipe Endpoint]])
   (:import
     clojure.lang.PersistentQueue))
 
@@ -344,3 +345,12 @@
                    (set! prev v)
                    b))))
   :finish! (when batch (persistent! batch)))
+
+(defn repeat
+  [elem]
+  (reify
+    Endpoint
+    Feed
+    (<value [this] elem)
+    clojure.lang.Seqable
+    (seq [this] (sequence nil this))))

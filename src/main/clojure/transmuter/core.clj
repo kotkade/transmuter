@@ -68,14 +68,15 @@
 (defn sequence
   "Creates a lazy sequence based on the transformed values of the
   input."
-  [pipes coll]
-  (let [pipeline (>pipeline pipes (>feed coll))
-        step     (fn step []
-                   (lazy-seq
-                     (let [x (<value pipeline)]
-                       (when-not (identical? x void)
-                         (cons x (step))))))]
-    (step)))
+  ([coll] (sequence nil coll))
+  ([pipes coll]
+   (let [pipeline (>pipeline pipes (>feed coll))
+         step     (fn step []
+                    (lazy-seq
+                      (let [x (<value pipeline)]
+                        (when-not (identical? x void)
+                          (cons x (step))))))]
+     (step))))
 
 (defn into
   "Returns a new collection consisting of coll with all of the

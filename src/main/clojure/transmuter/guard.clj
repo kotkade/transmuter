@@ -14,17 +14,3 @@
 (def stop (Object.))
 (def void (Object.))
 (def vacuum (Object.))
-
-(def guards #{stop void vacuum})
-
-(defn stop?
-  [this]
-  (identical? this stop))
-
-(defn void?
-  [this]
-  (identical? this void))
-
-(defn vacuum?
-  [this]
-  (identical? this vacuum))

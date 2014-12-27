@@ -41,9 +41,8 @@
               take-nth
               take-while])
   (:require
-    [transmuter.feed :refer [<value >feed]]
-    [transmuter.guard
-     :refer [vacuum vacuum? stop stop? void void? guards]]
+    [transmuter.feed     :refer [<value >feed]]
+    [transmuter.guard    :refer [vacuum stop void]]
     [transmuter.pipeline :refer [>pipeline defpipe]])
   (:import
     clojure.lang.PersistentQueue))
@@ -61,7 +60,7 @@
   (let [pipeline (>pipeline pipes (>feed coll))]
     (loop [acc (f)]
       (let [x (<value pipeline)]
-        (if-not (void? x)
+        (if-not (identical? x void)
           (recur (f acc x))
           (f acc))))))
 
@@ -73,7 +72,7 @@
         step     (fn step []
                    (lazy-seq
                      (let [x (<value pipeline)]
-                       (when-not (void? x)
+                       (when-not (identical? x void)
                          (cons x (step))))))]
     (step)))
 
@@ -110,14 +109,17 @@
 
 (defpipe cat
   []
-  :state [^:unsynchronized-mutable inner-feed nil]
-  :<feed (let [v (<value inner-feed)]
-           (if (void? v)
-             (let [iv (<value feed)]
-               (if-not (contains? guards iv)
-                 (do (set! inner-feed (>feed iv)) (recur))
-                 iv))
-             v)))
+  :state [inner-feed (volatile! nil)]
+  :feed  (loop []
+           (let [v (<value @inner-feed)]
+             (if (identical? v void)
+               (let [iv (<value feed)]
+                 (condp identical? iv
+                   void   void
+                   stop   stop
+                   vacuum vacuum
+                   (do (vreset! inner-feed (>feed iv)) (recur))))
+               v))))
 
 (defn mapcat
   [f]

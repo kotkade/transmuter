@@ -11,8 +11,8 @@
 
 (ns transmuter.pipeline
   (:require
-    [transmuter.feed :refer [<value >feed Feed]]
-    [transmuter.guard :refer [void? void stop? stop guards]]
+    [transmuter.feed  :refer [<value >feed Feed]]
+    [transmuter.guard :refer [void stop vacuum]]
     [clojure.string :as string]))
 
 (defprotocol PipeDefinition
@@ -54,14 +54,12 @@
   Feed
   (<value [this]
     (let [value (<value inner-pipe)]
-      (cond
-        (void? value) (if-let [final-values (finish! inner-pipe)]
-                        (do
-                          (set! inner-pipe (>feed final-values))
-                          (recur))
-                        void)
-        (stop? value) void
-        :else value))))
+      (condp identical? value
+        void (if-let [final-values (finish! inner-pipe)]
+               (do (set! inner-pipe (>feed final-values)) (recur))
+               void)
+        stop void
+        value))))
 
 (defn >pipeline
   [pipes input]

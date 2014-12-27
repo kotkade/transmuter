@@ -50,7 +50,10 @@
   (stop!   [this]   nil)
   (finish! [this]   nil))
 
+(defprotocol Endpoint)
+
 (deftype Pipeline [^:unsynchronized-mutable inner-pipe]
+  Endpoint
   Feed
   (<value [this]
     (let [value (<value inner-pipe)]
@@ -63,7 +66,9 @@
 
 (defn >pipeline
   [pipes input]
-  (->Pipeline (>pipe pipes input)))
+  (let [pipeline (>pipe pipes input)]
+    (cond-> pipeline
+      (not (satisfies? Endpoint pipeline)) ->Pipeline)))
 
 (defn ^:private >pipe-type
   [s]

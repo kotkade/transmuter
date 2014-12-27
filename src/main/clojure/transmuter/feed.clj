@@ -138,6 +138,7 @@
   Object
   (>feed [this]
     (cond
+      (satisfies? Feed this)    (-extend-feed (class this) identity)
       (.isArray (class this))   (-extend-feed (class this) >objects-array-feed)
       (instance? Iterator this) (-extend-feed (class this) >iterator-feed)
       (instance? ISeq this)     (-extend-feed (class this) >seq-feed)

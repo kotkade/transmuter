@@ -290,8 +290,8 @@
                  b)
                void))
   :finish! (when (and (or pad all?) (pos? (count batch)))
-             (persistent!
-               (reduce conj! batch (cc/take (- n (count batch)) pad)))))
+             [(persistent!
+                (reduce conj! batch (cc/take (- n (count batch)) pad)))]))
 
 (defpipe offset-partition
   [n step pad all?]
@@ -312,8 +312,8 @@
                  b)
                void))
   :finish! (when (or pad all?)
-             (persistent!
-               (reduce conj! batch (cc/take (- n (count batch)) pad)))))
+             [(persistent!
+                (reduce conj! batch (cc/take (- n (count batch)) pad)))]))
 
 (defn partition
   ([n]          (partition n n nil))

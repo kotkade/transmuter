@@ -82,17 +82,18 @@
   "Returns a new collection consisting of coll with all of the
   items of the input conjoined. Each input value is transformed
   by the given pipes."
-  [coll pipes input]
-  (let [f (if (instance? clojure.lang.IEditableCollection coll)
-            (fn
-              ([]      (transient coll))
-              ([acc]   (with-meta (persistent! acc) (meta coll)))
-              ([acc x] (conj! acc x)))
-            (fn
-              ([]      coll)
-              ([acc]   acc)
-              ([acc x] (conj acc x))))]
-    (transmute pipes f input)))
+  ([coll input] (into coll nil input))
+  ([coll pipes input]
+   (let [f (if (instance? clojure.lang.IEditableCollection coll)
+             (fn
+               ([]      (transient coll))
+               ([acc]   (with-meta (persistent! acc) (meta coll)))
+               ([acc x] (conj! acc x)))
+             (fn
+               ([]      coll)
+               ([acc]   acc)
+               ([acc x] (conj acc x))))]
+     (transmute pipes f input))))
 
 (defpipe map
   [f]

@@ -46,7 +46,7 @@
     [transmuter.guard    :refer [vacuum stop void]]
     [transmuter.pipeline :refer [>pipeline defpipe fswap!]])
   (:import
-    clojure.lang.PersistentQueue))
+    java.util.ArrayDeque))
 
 (alias 'cc 'clojure.core)
 
@@ -168,14 +168,14 @@
 
 (defpipe take-last
   [n]
-  :state   [n n
-            ^:unsynchronized-mutable batch PersistentQueue/EMPTY]
+  :state   [^long n n
+            ^ArrayDeque batch (ArrayDeque. (int n))]
   :process ([x]
-             (when (= (count batch) n)
-               (fswap! batch pop))
-             (fswap! batch conj x)
+             (when (= (.size batch) n)
+               (.poll batch))
+             (.offer batch x)
              void)
-  :finish! (seq batch))
+  :finish! (.toArray batch))
 
 (defpipe take-while
   [pred]
@@ -190,14 +190,12 @@
 (defpipe drop-last
   [n]
   :state   [n n
-            ^:unsynchronized-mutable batch PersistentQueue/EMPTY]
+            ^ArrayDeque batch (ArrayDeque. (int (inc n)))]
   :process ([x]
-             (fswap! batch conj x)
-             (if (> (count batch) n)
-               (let [y (peek batch)]
-                 (fswap! batch pop)
-                 y)
-               void)))
+            (.offer batch x)
+            (if (> (.size batch) n)
+              (.poll batch)
+              void)))
 
 (defpipe drop-while
   [pred]
@@ -299,16 +297,16 @@
             all?         all?
             ^long n      n
             ^long offset (- n step)
-            ^:unsynchronized-mutable history PersistentQueue/EMPTY
+            ^ArrayDeque history (ArrayDeque. (int offset))
             ^:unsynchronized-mutable batch   (transient [])]
   :process ([x]
-             (when (= (count history) offset)
-               (fswap! history pop))
-             (fswap! history conj x)
+             (when (= (.size history) offset)
+               (.poll history))
+             (.offer history x)
              (fswap! batch conj! x)
              (if (= (count batch) n)
                (let [b (persistent! batch)]
-                 (set! batch (reduce conj! (transient []) history))
+                 (set! batch (reduce conj! (transient []) (.toArray history)))
                  b)
                void))
   :finish! (when (or pad all?)

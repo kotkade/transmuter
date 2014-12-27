@@ -1,6 +1,7 @@
 syntax: glob
 
 .gradle/*
+.gradle*
 build/*
 .classpath
 .project

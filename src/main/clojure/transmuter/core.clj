@@ -42,9 +42,9 @@
               take-nth
               take-while])
   (:require
-    [transmuter.feed     :refer [<value >feed Feed]]
+    [transmuter.feed     :refer [<value stop! finish! >feed Feed Endpoint]]
     [transmuter.guard    :refer [vacuum stop void]]
-    [transmuter.pipeline :refer [>pipeline defpipe Endpoint]])
+    [transmuter.pipeline :refer [>pipeline defpipe fswap!]])
   (:import
     clojure.lang.PersistentQueue))
 
@@ -93,10 +93,6 @@
               ([acc]   acc)
               ([acc x] (conj acc x))))]
     (transmute pipes f input)))
-
-(defmacro fswap!
-  [field f & args]
-  `(set! ~field (~f ~field ~@args)))
 
 (defpipe map
   [f]

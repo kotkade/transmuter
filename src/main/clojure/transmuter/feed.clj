@@ -26,24 +26,34 @@
   [v f & args]
   `(set! ~v (~f ~v ~@args)))
 
-(defprotocol Source
-  (>feed [this] "Create a feed from the given input source."))
-
 (defprotocol Feed
   (<value [this]
   "Read one value from the feed, guard/vacuum when a new value is not
-  yet available or guard/void if the input source is exhausted."))
+  yet available or guard/void if the input source is exhausted.")
+  (stop! [this]
+  "Stop this feed unconditionally and don't do any further processing.
+  In case resources have to be released, this is the place to do it.")
+  (finish! [this]
+  "Called after the last value is processed. May return nil or a collection
+  of final values to be processed by the consumer of this feed. A feed
+  return nil on finish! should also extend the Endpoint marker protocol."))
+
+;; Special type of feed, which will return nil on `finish!`.
+(defprotocol Endpoint)
+
+(extend-protocol Endpoint nil)
 
 (extend-protocol Feed
-  Object
-  (<value [this] void)
-
   nil
-  (<value [this] void))
+  (<value  [this] void)
+  (stop!   [this] nil)
+  (finish! [this] nil))
 
 (defn >iterator-feed
   [^Iterator iter]
-  (reify Feed
+  (reify Endpoint Feed
+    (stop!   [this] nil)
+    (finish! [this] nil)
     (<value [this]
       (if (.hasNext iter)
         (.next iter)
@@ -57,7 +67,10 @@
                   ^:unsynchronized-mutable ^ArrayChunk current-chunk
                   ^:unsynchronized-mutable ^long idx
                   ^:unsynchronized-mutable ^long end]
+  Endpoint
   Feed
+  (stop!   [this] nil)
+  (finish! [this] nil)
   (<value [this]
     (cond
       current-chunk   (if (< idx end)
@@ -87,6 +100,9 @@
   [coll]
   (>seq-feed (seq coll)))
 
+(defprotocol Source
+  (>feed* [this] "Create a feed from the given input source."))
+
 (defmacro defarrayfeed
   [elem-type]
   (let [elem-type-name (name elem-type)
@@ -102,7 +118,10 @@
        (deftype ~feed-type
          [~(with-meta 'array {:tag elem-type})
           ~(with-meta 'idx {:tag 'long :unsynchronized-mutable true})]
+         Endpoint
          Feed
+         (stop!   [this#] nil)
+         (finish! [this#] nil)
          (<value [this#]
            (if (< ~'idx (alength ~'array))
              (do
@@ -114,7 +133,7 @@
          [array#]
          (~(symbol (str "->" feed-type)) array# 0))
        (extend (class (~prototype 0))
-         Source {:>feed ~ctor-name}))))
+         Source {:>feed* ~ctor-name}))))
 
 (defarrayfeed objects)
 (defarrayfeed bytes)
@@ -124,29 +143,32 @@
 (defarrayfeed floats)
 (defarrayfeed doubles)
 
-(defn ^:private -extend-feed
+(defn ^:private -extend-source
   [klass f]
-  (extend klass Source {:>feed f}))
+  (extend klass Source {:>feed* f}))
 
 (extend-protocol Source
   APersistentVector
-  (>feed [this] (>seq-feed (seq this)))
+  (>feed* [this] (>seq-feed (seq this)))
 
   ChunkedCons
-  (>feed [this] (>seq-feed (seq this)))
+  (>feed* [this] (>seq-feed (seq this)))
 
   Object
-  (>feed [this]
+  (>feed* [this]
     (cond
-      (satisfies? Feed this)    (-extend-feed (class this) identity)
-      (.isArray (class this))   (-extend-feed (class this) >objects-array-feed)
-      (instance? Iterator this) (-extend-feed (class this) >iterator-feed)
-      (instance? ISeq this)     (-extend-feed (class this) >seq-feed)
-      (instance? Iterable this) (-extend-feed (class this) >iterable-feed)
-      (instance? Seqable this)  (-extend-feed (class this) >seqable-feed)
+      (.isArray (class this))   (-extend-source (class this) >objects-array-feed)
+      (instance? Iterator this) (-extend-source (class this) >iterator-feed)
+      (instance? ISeq this)     (-extend-source (class this) >seq-feed)
+      (instance? Iterable this) (-extend-source (class this) >iterable-feed)
+      (instance? Seqable this)  (-extend-source (class this) >seqable-feed)
       :else (throw (ex-info "Don't know how to create feed from class"
                             {:class (class this)})))
-    (>feed this))
+    (>feed* this))
 
   nil
-  (>feed [this] (constantly void)))
+  (>feed* [this] nil))
+
+(defn >feed
+  [this]
+  (cond-> this (not (satisfies? Feed this)) >feed*))

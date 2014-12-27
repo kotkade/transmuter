@@ -11,7 +11,7 @@
 
 (ns transmuter.pipeline
   (:require
-    [transmuter.feed  :refer [<value >feed Feed]]
+    [transmuter.feed  :refer [<value finish! stop! >feed Feed Endpoint]]
     [transmuter.guard :refer [void stop vacuum]]
     [clojure.string :as string]))
 
@@ -31,37 +31,21 @@
   nil
   (>pipe [this feed] feed))
 
-(defprotocol Pipe
-  (stop! [this]
-  "Stop this pipe step and its feed unconditionally and don't
-  do any further processing. This is called only internally
-  and should not be used directly by the user!")
-  (finish! [this]
-  "Called after the last value is processed. May return nil,
-  a final value or a final Injection with additional values.
-  Must be called once and only once."))
+(defmacro fswap!
+  [field f & args]
+  `(set! ~field (~f ~field ~@args)))
 
-(extend-protocol Pipe
-  Object
-  (stop!   [this]   nil)
-  (finish! [this]   nil)
-
-  nil
-  (stop!   [this]   nil)
-  (finish! [this]   nil))
-
-(defprotocol Endpoint)
-
-(deftype Pipeline [^:unsynchronized-mutable inner-pipe]
+(deftype Pipeline [^:unsynchronized-mutable inner-feed]
   Endpoint
   Feed
+  (stop!   [this] (stop! inner-feed) nil)
+  (finish! [this] nil)
   (<value [this]
-    (let [value (<value inner-pipe)]
+    (let [value (<value inner-feed)]
       (condp identical? value
-        void (if-let [final-values (finish! inner-pipe)]
-               (do (set! inner-pipe (>feed final-values)) (recur))
+        void (if-let [final-values (finish! inner-feed)]
+               (do (set! inner-feed (>feed final-values)) (recur))
                void)
-        stop void
         value))))
 
 (defn >pipeline
@@ -93,6 +77,7 @@
         (fn-tail body)
         feed         (or feed `(<value ~'feed))
         value        (gensym "value_")
+        this         (gensym "this_")
         process      (when process
                        (fn [value-sym]
                          `(let ~(conj (first process) value-sym)
@@ -108,22 +93,22 @@
     `(do
        (deftype ~tname
          ~(into '[^:unsynchronized-mutable feed] state-defs)
-         Pipe
-         (stop!   [this#] (stop! ~'feed) ~stop!)
-         (finish! [this#] (set! ~'feed nil) (stop! this#) ~finish!)
+         ~@(when-not finish! `[Endpoint])
          Feed
-         (<value [this#]
+         (stop!   [~this] (stop! ~'feed) ~stop!)
+         (finish! [~this] ~finish!)
+         (<value [~this]
            (let [~value ~feed]
              (condp identical? ~value
-               void   (if-let [final-value# (finish! ~'feed)]
-                        (do (set! ~'feed (>feed final-value#)) (recur))
-                        void)
-               stop   void
+               void   (if-let [final-values# (finish! ~'feed)]
+                        (do (set! ~'feed (>feed final-values#)) (recur))
+                        (do ~stop! void))
                vacuum vacuum
                ~(if process
                   `(let [inner-value# ~(process value)]
-                     (if (identical? void inner-value#)
-                       (recur)
+                     (condp identical? inner-value#
+                       void (recur)
+                       stop (do (stop! ~this) void)
                        inner-value#))
                   value)))))
        (def ~pname

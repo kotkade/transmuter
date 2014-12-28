@@ -357,3 +357,11 @@
 (defn repeat
   ([elem]   (repeating elem))
   ([n elem] (finite-repeating n elem)))
+
+(defproducer iterate
+  [f init]
+  :state  [f f
+           ^:unsynchronized-mutable value init]
+  :feeder (let [v value]
+            (fswap! value f)
+            v))

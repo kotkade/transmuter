@@ -12,6 +12,7 @@
 (ns transmuter.core
   (:refer-clojure
     :exclude [cat
+              cycle
               butlast
               dedupe
               distinct
@@ -47,7 +48,8 @@
     [transmuter.guard    :refer [vacuum stop void]]
     [transmuter.pipeline :refer [>pipeline defpipe defproducer fswap!]])
   (:import
-    java.util.ArrayDeque))
+    java.util.ArrayDeque
+    java.util.ArrayList))
 
 (alias 'cc 'clojure.core)
 
@@ -365,3 +367,19 @@
   :feeder (let [v value]
             (fswap! value f)
             v))
+
+(defproducer cycle
+  [coll]
+  :state  [^:unsynchronized-mutable          feed (>feed coll)
+           ^:unsynchronized-mutable ^long    n    0
+           ^ArrayList collector (ArrayList.)]
+  :feeder (if feed
+            (let [v (<value feed)]
+              (if-not (identical? v void)
+                (do (.add collector v) v)
+                (do (set! feed nil) (recur))))
+            (let [v (.get collector (int n))]
+              (fswap! n inc)
+              (when (== n (.size collector))
+                (set! n 0))
+              v)))

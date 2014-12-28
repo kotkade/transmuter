@@ -21,6 +21,7 @@
               filter
               interpose
               into
+              iterate
               keep
               keep-indexed
               map
@@ -44,7 +45,7 @@
   (:require
     [transmuter.feed     :refer [<value stop! finish! >feed Feed Endpoint]]
     [transmuter.guard    :refer [vacuum stop void]]
-    [transmuter.pipeline :refer [>pipeline defpipe fswap!]])
+    [transmuter.pipeline :refer [>pipeline defpipe defproducer fswap!]])
   (:import
     java.util.ArrayDeque))
 
@@ -342,11 +343,17 @@
                    b))))
   :finish! (when batch (persistent! batch)))
 
-(defn repeat
+(defproducer repeating
   [elem]
-  (reify
-    Endpoint
-    Feed
-    (<value [this] elem)
-    clojure.lang.Seqable
-    (seq [this] (sequence nil this))))
+  :state  [elem elem]
+  :feeder elem)
+
+(defproducer finite-repeating
+  [n elem]
+  :state  [elem elem
+           ^:unsynchronized-mutable ^long n n]
+  :feeder (if-not (neg? (fswap! n dec)) elem void))
+
+(defn repeat
+  ([elem]   (repeating elem))
+  ([n elem] (finite-repeating n elem)))

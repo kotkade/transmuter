@@ -10,8 +10,10 @@
 ; (cf. file MIT distributed with the source code).
 
 (ns transmuter.pipeline
+  (:import
+    clojure.lang.Seqable)
   (:require
-    [transmuter.feed  :refer [<value finish! stop! >feed Feed Endpoint]]
+    [transmuter.feed  :refer [<value finish! stop! >feed Source Feed Endpoint]]
     [transmuter.guard :refer [void stop vacuum]]
     [clojure.string :as string]))
 
@@ -54,11 +56,11 @@
     (cond-> pipeline
       (not (satisfies? Endpoint pipeline)) ->Pipeline)))
 
-(defn ^:private >pipe-type
-  [s]
+(defn ^:private >type-name
+  [s postfix]
   (-> s
     name
-    (str "-pipe")
+    (str "-" postfix)
     (.split "-")
     (->>
       (map string/capitalize)
@@ -89,7 +91,7 @@
         wrap         (if (pos? (count args))
                        (fn [body] `(fn ~args ~body))
                        (fn [body] body))
-        tname        (>pipe-type pname)]
+        tname        (>type-name pname "pipe")]
     `(do
        (deftype ~tname
          ~(into '[^:unsynchronized-mutable feed] state-defs)
@@ -116,3 +118,31 @@
             `(fn [input#]
                (let ~(vec (interleave state-locals state-inits))
                  (new ~tname input# ~@state-locals))))))))
+
+(defmacro defproducer
+  [pname & body]
+  (let [[docstring args & {:keys [state feeder]}]
+        (fn-tail body)
+        state-defs   (take-nth 2 state)
+        state-locals (map #(with-meta % nil) state-defs)
+        state-inits  (take-nth 2 (next state))
+        pname        (vary-meta pname update-in [:doc] (fnil identity docstring))
+        tname        (>type-name pname "feed")]
+    `(do
+       (deftype ~tname
+         ~(vec state-defs)
+         Endpoint
+         Feed
+         (stop!   [this#] nil)
+         (finish! [this#] nil)
+         (<value  [this#] ~feeder))
+       (defn ~pname
+         ~args
+         (reify
+           Source
+           (>feed* [this#]
+             (let ~(vec (interleave state-locals state-inits))
+               (new ~tname ~@state-locals)))
+           Seqable
+           (seq [this#]
+             (transmuter.core/sequence (>feed this#))))))))

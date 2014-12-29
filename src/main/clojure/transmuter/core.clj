@@ -360,6 +360,21 @@
   ([elem]   (repeating elem))
   ([n elem] (finite-repeating n elem)))
 
+(defproducer repeatedly-calling
+  [f]
+  :state  [f f]
+  :feeder (f))
+
+(defproducer finite-repeatedly-calling
+  [n f]
+  :state  [f f
+           ^:unsynchronized-mutable ^long n n]
+  :feeder (if-not (neg? (fswap! n dec)) (f) void))
+
+(defn repeatedly
+  ([f]   (repeatedly-calling f))
+  ([n f] (finite-repeatedly-calling n f)))
+
 (defproducer iterate
   [f init]
   :state  [f f

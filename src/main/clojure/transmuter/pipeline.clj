@@ -138,11 +138,12 @@
          (<value  [this#] ~feeder))
        (defn ~pname
          ~args
-         (reify
-           Source
-           (>feed* [this#]
-             (let ~(vec (interleave state-locals state-inits))
-               (new ~tname ~@state-locals)))
-           Seqable
-           (seq [this#]
-             (transmuter.core/sequence (>feed this#))))))))
+         (let [f (fn []
+                   (let ~(vec (interleave state-locals state-inits))
+                     (new ~tname ~@state-locals)))
+               s (delay (transmuter.core/sequence (f)))]
+           (reify
+             Source
+             (>feed* [this#] (f))
+             Seqable
+             (seq [this#] @s)))))))
